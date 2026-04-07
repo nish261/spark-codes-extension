@@ -336,8 +336,9 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
           if (info.identity_type !== "AUTH_CODE") continue;
           const key = info.tiktok_item_id || info.identity_id;
           if (!key || seen.has(key)) continue;
-          seen.add(key);
           const matStatus = c.material_operation_status || status;
+          if (matStatus !== "ENABLE") continue; // only approved creatives
+          seen.add(key);
           codes.push({
             spark_code:    info.identity_id,
             tiktok_item_id: info.tiktok_item_id,
