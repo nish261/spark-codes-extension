@@ -133,13 +133,10 @@ debugBtn.addEventListener("click", async () => {
         identity_type: ${esc(ad.identity_type||"—")}<br>
         identity_id: ${esc(ad.identity_id||"—")}<br>
         status: ${esc(ad.secondary_status||ad.operation_status||"—")}<br>
-        creatives: ${esc(JSON.stringify((ad.creative_list||[]).map(c=>({
-          identity_type: c.identity_type,
-          identity_id: c.identity_id,
-          tiktok_item_id: c.tiktok_item_id,
-          video_id: c.video_id,
-          review_status: c.review_status,
-        }))))}
+        first creative keys: ${esc(Object.keys(ad.creative_list?.[0]||{}).join(", "))}<br>
+        first creative_info keys: ${esc(Object.keys(ad.creative_list?.[0]?.creative_info||{}).join(", "))}<br>
+        first creative_info: ${esc(JSON.stringify(ad.creative_list?.[0]?.creative_info||{}))}<br>
+        first material_operation_status: ${esc(ad.creative_list?.[0]?.material_operation_status||"—")}
       `).join("<br>---<br>")}
     </div></div>`;
     setStatus(`smart_plus/ad/get: ${list.length} ads`, "success");
