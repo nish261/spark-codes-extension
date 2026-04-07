@@ -108,38 +108,41 @@ function setConnecting() {
   connectLabel.textContent = "Waiting for authorization...";
 }
 
-// ── Debug: dump raw fields ────────────────────────────────────────────────────
+// ── Debug: dump raw Smart+ ad fields ─────────────────────────────────────────
 debugBtn.addEventListener("click", async () => {
   if (!currentToken) { setStatus("Connect first.", "error"); return; }
   const advId = advInput.value.trim();
   if (!advId) { setStatus("Enter advertiser ID.", "error"); return; }
-  setStatus("Fetching raw ad data...", "");
+  setStatus("Fetching raw Smart+ ad data...", "");
   try {
-    // Smart+ Material Report Overview — same as Creative Assets insights page
-    const end_date   = new Date().toISOString().slice(0,10);
-    const start_date = new Date(Date.now() - 90*24*60*60*1000).toISOString().slice(0,10);
-    const data = await apiGet("/smart_plus/material_report/overview/", currentToken, {
+    const data = await apiGet("/smart_plus/ad/get/", currentToken, {
       advertiser_id: advId,
-      dimensions:    JSON.stringify(["main_material_id", "smart_plus_ad_id"]),
-      start_date,
-      end_date,
-      page:          1,
-      page_size:     10,
+      page: 1,
+      page_size: 5,
     });
     const list = data.data?.list || [];
     countEl.textContent = list.length;
     resultsEl.style.display = "block";
-    const allKeys = list[0] ? Object.keys(list[0]).join(", ") : "no data";
-    const dimKeys = list[0]?.dimensions ? Object.keys(list[0].dimensions).join(", ") : "none";
-    codeListEl.innerHTML = `<div class="code-item"><div class="code-meta">
-      top keys: ${esc(allKeys)}<br>
-      dimension keys: ${esc(dimKeys)}<br><br>
-      ${list.slice(0,5).map(r => `
-        dims: ${esc(JSON.stringify(r.dimensions||{}))}<br>
-        metrics keys: ${esc(Object.keys(r.metrics||{}).slice(0,5).join(", "))}
+    const topKeys = list[0] ? Object.keys(list[0]).join(", ") : "no data";
+    const creativeKeys = list[0]?.creative_list?.[0] ? Object.keys(list[0].creative_list[0]).join(", ") : "no creative_list";
+    codeListEl.innerHTML = `<div class="code-item"><div class="code-meta" style="word-break:break-all">
+      ad keys: ${esc(topKeys)}<br><br>
+      creative_list[0] keys: ${esc(creativeKeys)}<br><br>
+      ${list.slice(0,3).map(ad => `
+        <b>ad:</b> ${esc(ad.ad_name||ad.ad_id)}<br>
+        identity_type: ${esc(ad.identity_type||"—")}<br>
+        identity_id: ${esc(ad.identity_id||"—")}<br>
+        status: ${esc(ad.secondary_status||ad.operation_status||"—")}<br>
+        creatives: ${esc(JSON.stringify((ad.creative_list||[]).map(c=>({
+          identity_type: c.identity_type,
+          identity_id: c.identity_id,
+          tiktok_item_id: c.tiktok_item_id,
+          video_id: c.video_id,
+          review_status: c.review_status,
+        }))))}
       `).join("<br>---<br>")}
     </div></div>`;
-    setStatus(`material_report/overview: ${list.length} rows`, "success");
+    setStatus(`smart_plus/ad/get: ${list.length} ads`, "success");
   } catch(e) { setStatus("Error: " + e.message, "error"); }
 });
 
@@ -233,15 +236,45 @@ async function fetchSparkCodes(token, advertiserId) {
     console.warn("ad/get failed:", e.message);
   }
 
-  if (!codes.length) {
-    // Surface the raw identity/get response for debugging
-    try {
-      const raw = await apiGet("/identity/get/", token, { advertiser_id: advertiserId, page_size: 10 });
-      throw new Error(`No AUTH_CODE identities found. identity/get returned ${raw.data?.list?.length ?? 0} total identities. Check console for details.`);
-    } catch (e2) {
-      if (e2.message.startsWith("No AUTH_CODE")) throw e2;
-      throw new Error("No spark codes found and identity/get also errored: " + e2.message);
+  // Strategy 3: Smart+ ad/get — identity_id may live on the ad directly or in creative_list
+  try {
+    let page = 1;
+    while (true) {
+      const data = await apiGet("/smart_plus/ad/get/", token, {
+        advertiser_id: advertiserId,
+        page,
+        page_size: 100,
+      });
+      const items = data.data?.list || [];
+      const total = data.data?.page_info?.total_number || 0;
+      for (const ad of items) {
+        const status = (ad.secondary_status || ad.operation_status || "")
+          .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
+
+        // Check ad-level identity_id
+        if (ad.identity_id && ad.identity_type === "AUTH_CODE" && !seen.has(ad.identity_id)) {
+          seen.add(ad.identity_id);
+          codes.push({ spark_code: ad.identity_id, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "smart+" });
+        }
+
+        // Check creative_list items
+        for (const c of (ad.creative_list || [])) {
+          const code = c.identity_id || c.tiktok_item_id;
+          if (!code || seen.has(code)) continue;
+          if (c.identity_type && c.identity_type !== "AUTH_CODE") continue;
+          seen.add(code);
+          codes.push({ spark_code: code, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "smart+" });
+        }
+      }
+      if (page * 100 >= total || !items.length) break;
+      page++;
     }
+  } catch (e) {
+    console.warn("smart_plus/ad/get failed:", e.message);
+  }
+
+  if (!codes.length) {
+    throw new Error("No spark codes found across identity/get, ad/get, and smart_plus/ad/get. Click Debug to inspect raw Smart+ ad fields.");
   }
 
   return codes;
