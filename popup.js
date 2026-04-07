@@ -83,7 +83,21 @@ detectCampaignBtn.addEventListener("click", async () => {
     }
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => new URL(location.href).searchParams.get("campaign_id") || null,
+      func: () => {
+        const href = location.href;
+        // Try query params first
+        const params = new URL(href).searchParams;
+        const fromParams = params.get("campaign_id") || params.get("campaign_ids");
+        if (fromParams) return fromParams.split(",")[0];
+        // Try hash fragment (TikTok often puts state in hash as JSON or key=val)
+        const hash = location.hash;
+        const hashMatch = hash.match(/campaign_id[s]?[=:](\d{15,20})/);
+        if (hashMatch) return hashMatch[1];
+        // Try URL path segments
+        const pathMatch = href.match(/\/campaign\/(\d{15,20})/);
+        if (pathMatch) return pathMatch[1];
+        return null;
+      },
     });
     const id = results?.[0]?.result;
     if (id) {
@@ -91,7 +105,7 @@ detectCampaignBtn.addEventListener("click", async () => {
       chrome.storage.local.set({ tt_campaign: id });
       setStatus(`Campaign detected: ${id}`, "success");
     } else {
-      setStatus("Open a specific campaign in Ads Manager first.", "error");
+      setStatus("Can't detect — paste campaign ID from the URL manually.", "error");
     }
   } catch (e) {
     setStatus("Detection failed: " + e.message, "error");
@@ -244,7 +258,7 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
         fields: JSON.stringify(["ad_id", "ad_name", "operation_status", "secondary_status",
                                 "campaign_id", "identity_type", "identity_id", "tiktok_item_id"]),
       };
-      if (campaignId) params.filtering = JSON.stringify({ campaign_id: campaignId });
+      if (campaignId) params.filtering = JSON.stringify({ campaign_ids: [campaignId] });
       const data = await apiGet("/ad/get/", token, params);
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
@@ -274,11 +288,12 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
     let page = 1;
     while (true) {
       const spParams = { advertiser_id: advertiserId, page, page_size: 100 };
-      if (campaignId) spParams.campaign_id = campaignId;
       const data = await apiGet("/smart_plus/ad/get/", token, spParams);
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
       for (const ad of items) {
+        // Client-side campaign filter (Smart+ API doesn't support campaign_id param)
+        if (campaignId && ad.campaign_id !== campaignId) continue;
         const status = (ad.secondary_status || ad.operation_status || "")
           .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
 
