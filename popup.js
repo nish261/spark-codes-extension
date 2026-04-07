@@ -206,10 +206,9 @@ function renderCodes(codes) {
   countEl.textContent = codes.length;
   resultsEl.style.display = "block";
   for (const c of codes) {
-    const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : "N/A";
+    const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : null;
     const item = document.createElement("div");
     item.className = "code-item";
-    const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : null;
     item.innerHTML = `
       <div class="code-value">${esc(c.spark_code)}</div>
       <div class="code-meta">
