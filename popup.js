@@ -2,27 +2,30 @@
 const API_BASE = "https://business-api.tiktok.com/open_api/v1.3";
 const OAUTH_URL = `https://business-api.tiktok.com/portal/auth?app_id=${APP_ID}&state=spark_plugin&redirect_uri=https%3A%2F%2Fkinetiksoul.com`;
 
-const connectBtn    = document.getElementById("connectBtn");
-const connectDot    = document.getElementById("connectDot");
-const connectLabel  = document.getElementById("connectLabel");
-const tokenBadge    = document.getElementById("tokenBadge");
-const advInput      = document.getElementById("advertiserId");
-const autoDetectBtn = document.getElementById("autoDetectBtn");
-const fetchBtn      = document.getElementById("fetchBtn");
-const debugBtn      = document.getElementById("debugBtn");
-const statusEl      = document.getElementById("status");
-const resultsEl     = document.getElementById("results");
-const codeListEl    = document.getElementById("codeList");
-const countEl       = document.getElementById("resultsCount");
-const copyAllBtn    = document.getElementById("copyAll");
-const toast         = document.getElementById("toast");
+const connectBtn       = document.getElementById("connectBtn");
+const connectDot       = document.getElementById("connectDot");
+const connectLabel     = document.getElementById("connectLabel");
+const tokenBadge       = document.getElementById("tokenBadge");
+const advInput         = document.getElementById("advertiserId");
+const autoDetectBtn    = document.getElementById("autoDetectBtn");
+const campaignInput    = document.getElementById("campaignId");
+const detectCampaignBtn = document.getElementById("detectCampaignBtn");
+const fetchBtn         = document.getElementById("fetchBtn");
+const debugBtn         = document.getElementById("debugBtn");
+const statusEl         = document.getElementById("status");
+const resultsEl        = document.getElementById("results");
+const codeListEl       = document.getElementById("codeList");
+const countEl          = document.getElementById("resultsCount");
+const copyAllBtn       = document.getElementById("copyAll");
+const toast            = document.getElementById("toast");
 
 let currentToken = null;
 let pollInterval = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-chrome.storage.local.get(["tt_token", "tt_advertiser"], (data) => {
+chrome.storage.local.get(["tt_token", "tt_advertiser", "tt_campaign"], (data) => {
   if (data.tt_advertiser) advInput.value = data.tt_advertiser;
+  if (data.tt_campaign)   campaignInput.value = data.tt_campaign;
   if (data.tt_token) setConnected(data.tt_token);
 });
 
@@ -67,6 +70,33 @@ autoDetectBtn.addEventListener("click", async () => {
     setStatus("Detection failed: " + e.message, "error");
   } finally {
     autoDetectBtn.textContent = "auto-detect";
+  }
+});
+
+// ── Auto-detect campaign ID ───────────────────────────────────────────────────
+detectCampaignBtn.addEventListener("click", async () => {
+  detectCampaignBtn.textContent = "detecting...";
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url?.includes("tiktok.com")) {
+      setStatus("Open TikTok Ads Manager first.", "error"); return;
+    }
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => new URL(location.href).searchParams.get("campaign_id") || null,
+    });
+    const id = results?.[0]?.result;
+    if (id) {
+      campaignInput.value = id;
+      chrome.storage.local.set({ tt_campaign: id });
+      setStatus(`Campaign detected: ${id}`, "success");
+    } else {
+      setStatus("Open a specific campaign in Ads Manager first.", "error");
+    }
+  } catch (e) {
+    setStatus("Detection failed: " + e.message, "error");
+  } finally {
+    detectCampaignBtn.textContent = "auto-detect";
   }
 });
 
@@ -148,13 +178,15 @@ fetchBtn.addEventListener("click", async () => {
   if (!currentToken) { setStatus("Connect first.", "error"); return; }
   const advId = advInput.value.trim();
   if (!advId) { setStatus("Enter advertiser ID.", "error"); return; }
+  const campId = campaignInput.value.trim();
   chrome.storage.local.set({ tt_advertiser: advId });
+  if (campId) chrome.storage.local.set({ tt_campaign: campId });
   fetchBtn.disabled = true;
   setStatus("Fetching...", "");
   codeListEl.innerHTML = "";
   resultsEl.style.display = "none";
   try {
-    const codes = await fetchSparkCodes(currentToken, advId);
+    const codes = await fetchSparkCodes(currentToken, advId, campId);
     renderCodes(codes);
     setStatus(codes.length ? `Found ${codes.length} spark code${codes.length > 1 ? "s" : ""}.` : "No spark codes found.", codes.length ? "success" : "");
   } catch (e) {
@@ -164,11 +196,12 @@ fetchBtn.addEventListener("click", async () => {
   }
 });
 
-async function fetchSparkCodes(token, advertiserId) {
+async function fetchSparkCodes(token, advertiserId, campaignId = "") {
   const seen = new Set();
   const codes = [];
 
-  // Strategy 1: pull AUTH_CODE identities directly
+  // Strategy 1: pull AUTH_CODE identities directly (no campaign filter available)
+  if (!campaignId) {
   try {
     let page = 1;
     while (true) {
@@ -198,18 +231,21 @@ async function fetchSparkCodes(token, advertiserId) {
   } catch (e) {
     console.warn("identity/get failed:", e.message);
   }
+  } // end !campaignId guard
 
   // Strategy 2: scrape codes from ad creatives (covers suspended accounts & non-Smart+ ads)
   try {
     let page = 1;
     while (true) {
-      const data = await apiGet("/ad/get/", token, {
+      const params = {
         advertiser_id: advertiserId,
         page,
         page_size: 100,
         fields: JSON.stringify(["ad_id", "ad_name", "operation_status", "secondary_status",
-                                "identity_type", "identity_id", "tiktok_item_id"]),
-      });
+                                "campaign_id", "identity_type", "identity_id", "tiktok_item_id"]),
+      };
+      if (campaignId) params.filtering = JSON.stringify({ campaign_id: campaignId });
+      const data = await apiGet("/ad/get/", token, params);
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
       for (const ad of items) {
@@ -237,11 +273,9 @@ async function fetchSparkCodes(token, advertiserId) {
   try {
     let page = 1;
     while (true) {
-      const data = await apiGet("/smart_plus/ad/get/", token, {
-        advertiser_id: advertiserId,
-        page,
-        page_size: 100,
-      });
+      const spParams = { advertiser_id: advertiserId, page, page_size: 100 };
+      if (campaignId) spParams.campaign_id = campaignId;
+      const data = await apiGet("/smart_plus/ad/get/", token, spParams);
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
       for (const ad of items) {
