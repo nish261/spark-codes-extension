@@ -1,4 +1,4 @@
-const APP_ID   = "7622963840885030913";
+// APP_ID is loaded from config.js via popup.html
 const API_BASE = "https://business-api.tiktok.com/open_api/v1.3";
 const OAUTH_URL = `https://business-api.tiktok.com/portal/auth?app_id=${APP_ID}&state=spark_plugin&redirect_uri=https%3A%2F%2Fkinetiksoul.com`;
 
@@ -218,7 +218,7 @@ function renderCodes(codes) {
       <div class="code-value">${esc(c.spark_code)}</div>
       <div class="code-meta">
         <span class="badge ${c.status.includes('SUSPEND') || c.status.includes('DISABLE') ? 'suspended' : ''}">${esc(c.status)}</span>
-        creator: ${esc(c.identity_id)} · ${esc(c.identity_name)}
+        ad: ${esc(c.identity_name)}
       </div>
       <span class="copy-hint">click to copy</span>`;
     item.addEventListener("click", () => copyText(c.spark_code));

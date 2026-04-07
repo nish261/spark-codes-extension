@@ -1,0 +1,2 @@
+const APP_ID     = "YOUR_TIKTOK_APP_ID";
+const APP_SECRET = "YOUR_TIKTOK_APP_SECRET";
