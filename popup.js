@@ -286,7 +286,7 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
         fields: JSON.stringify(["ad_id", "ad_name", "operation_status", "secondary_status",
                                 "campaign_id", "identity_type", "identity_id", "tiktok_item_id"]),
       };
-      if (campaignId) params.filtering = JSON.stringify({ campaign_ids: [campaignId] });
+      if (campaignId) params.filtering = JSON.stringify({ campaign_ids: [String(campaignId)] });
       const data = await apiGet("/ad/get/", token, params);
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
@@ -321,7 +321,7 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
       const total = data.data?.page_info?.total_number || 0;
       for (const ad of items) {
         // Client-side campaign filter (Smart+ API doesn't support campaign_id param)
-        if (campaignId && ad.campaign_id !== campaignId) continue;
+        if (campaignId && String(ad.campaign_id) !== String(campaignId)) continue;
         const status = (ad.secondary_status || ad.operation_status || "")
           .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
 
