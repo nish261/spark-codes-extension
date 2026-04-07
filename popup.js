@@ -84,31 +84,56 @@ detectCampaignBtn.addEventListener("click", async () => {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
-        const href = location.href;
-        const params = new URL(href).searchParams;
-        // Collect all 15-20 digit numbers from the entire URL (query + hash)
-        const allNums = (href + location.hash).match(/\d{15,20}/g) || [];
-        const advertiserNum = params.get("aadvid") || params.get("advertiser_id");
-        // Return all candidates plus full URL for debugging
-        return {
-          fromParam: params.get("campaign_id") || params.get("campaign_ids"),
-          allNums: [...new Set(allNums)].filter(n => n !== advertiserNum),
-          url: href.slice(0, 300),
-        };
+        const advertiserIds = new Set((location.href.match(/\d{19}/g) || []));
+
+        // 1. Check sessionStorage / localStorage for selected campaign
+        const stores = [sessionStorage, localStorage];
+        for (const store of stores) {
+          for (let i = 0; i < store.length; i++) {
+            try {
+              const val = store.getItem(store.key(i)) || "";
+              const m = val.match(/"campaign_id"\s*:\s*"(\d{15,20})"/);
+              if (m && !advertiserIds.has(m[1])) return { id: m[1], src: "storage" };
+            } catch {}
+          }
+        }
+
+        // 2. Scan all text nodes and data-* attributes on the page for campaign IDs
+        // TikTok's left nav renders campaign rows with data attributes
+        const candidates = new Set();
+        document.querySelectorAll("[data-campaign-id],[data-id]").forEach(el => {
+          const v = el.dataset.campaignId || el.dataset.id;
+          if (v && /^\d{15,20}$/.test(v) && !advertiserIds.has(v)) candidates.add(v);
+        });
+
+        // 3. Look in React fiber for selected campaign IDs
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+        let node;
+        while ((node = walker.nextNode())) {
+          const fiberKey = Object.keys(node).find(k => k.startsWith("__reactFiber") || k.startsWith("__reactInternals"));
+          if (!fiberKey) continue;
+          try {
+            const str = JSON.stringify(node[fiberKey]?.memoizedProps || {});
+            (str.match(/\d{15,20}/g) || []).forEach(n => {
+              if (!advertiserIds.has(n)) candidates.add(n);
+            });
+          } catch {}
+          if (candidates.size > 5) break; // don't hang
+        }
+
+        const list = [...candidates];
+        return list.length === 1 ? { id: list[0], src: "dom" } : { id: null, candidates: list.slice(0, 8) };
       },
     });
     const res = results?.[0]?.result;
-    const id = res?.fromParam?.split(",")?.[0] || (res?.allNums?.length === 1 ? res.allNums[0] : null);
-    if (id) {
-      campaignInput.value = id;
-      chrome.storage.local.set({ tt_campaign: id });
-      setStatus(`Campaign detected: ${id}`, "success");
-    } else if (res?.allNums?.length > 1) {
-      // Multiple candidates — show them so user can pick
-      setStatus(`Multiple IDs found — pick one: ${res.allNums.join(" | ")}`, "error");
+    if (res?.id) {
+      campaignInput.value = res.id;
+      chrome.storage.local.set({ tt_campaign: res.id });
+      setStatus(`Campaign detected: ${res.id}`, "success");
+    } else if (res?.candidates?.length) {
+      setStatus(`Pick your campaign ID: ${res.candidates.join(" · ")}`, "error");
     } else {
-      // Dump URL so we can see the structure
-      setStatus(`Not found. URL: ${res?.url || "unknown"}`, "error");
+      setStatus("Can't auto-detect. Go to Campaigns tab → click your campaign → try again.", "error");
     }
   } catch (e) {
     setStatus("Detection failed: " + e.message, "error");
