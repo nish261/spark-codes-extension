@@ -202,8 +202,7 @@ debugBtn.addEventListener("click", async () => {
       creative_list[0] keys: ${esc(creativeKeys)}<br><br>
       ${list.slice(0,3).map(ad => `
         <b>ad:</b> ${esc(ad.ad_name||ad.ad_id)}<br>
-        identity_type: ${esc(ad.identity_type||"—")}<br>
-        identity_id: ${esc(ad.identity_id||"—")}<br>
+        campaign_id: ${esc(ad.campaign_id||"—")}<br>
         status: ${esc(ad.secondary_status||ad.operation_status||"—")}<br>
         first creative keys: ${esc(Object.keys(ad.creative_list?.[0]||{}).join(", "))}<br>
         first creative_info keys: ${esc(Object.keys(ad.creative_list?.[0]?.creative_info||{}).join(", "))}<br>
