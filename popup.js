@@ -170,8 +170,9 @@ async function fetchSparkCodes(token, advertiserId) {
   let page = 1;
 
   while (true) {
-    const data = await apiGet("/smart_plus/ad/get/", token, {
+    const data = await apiGet("/identity/get/", token, {
       advertiser_id: advertiserId,
+      identity_type: "AUTH_CODE",
       page,
       page_size: 100,
     });
@@ -179,22 +180,16 @@ async function fetchSparkCodes(token, advertiserId) {
     const items = data.data?.list || [];
     const total = data.data?.page_info?.total_number || 0;
 
-    for (const ad of items) {
-      const status = (ad.secondary_status || ad.operation_status || "")
-        .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim();
-
-      // identity_id lives in creative_list items
-      for (const creative of (ad.creative_list || [])) {
-        const code = creative.identity_id;
-        if (!code || seen.has(code)) continue;
-        seen.add(code);
-        codes.push({
-          spark_code:    code,
-          identity_name: ad.ad_name || "N/A",
-          status:        status || "ACTIVE",
-          expire_time:   null,
-        });
-      }
+    for (const identity of items) {
+      const code = identity.identity_id;
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      codes.push({
+        spark_code:    code,
+        identity_name: identity.display_name || identity.identity_name || "N/A",
+        status:        "ACTIVE",
+        expire_time:   identity.expire_time || null,
+      });
     }
 
     if (page * 100 >= total || !items.length) break;
@@ -214,11 +209,12 @@ function renderCodes(codes) {
     const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : "N/A";
     const item = document.createElement("div");
     item.className = "code-item";
+    const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : null;
     item.innerHTML = `
       <div class="code-value">${esc(c.spark_code)}</div>
       <div class="code-meta">
-        <span class="badge ${c.status.includes('SUSPEND') || c.status.includes('DISABLE') ? 'suspended' : ''}">${esc(c.status)}</span>
-        ad: ${esc(c.identity_name)}
+        <span class="badge">${esc(c.status)}</span>
+        ${esc(c.identity_name)}${expire ? ` · expires ${expire}` : ""}
       </div>
       <span class="copy-hint">click to copy</span>`;
     item.addEventListener("click", () => copyText(c.spark_code));
