@@ -85,27 +85,30 @@ detectCampaignBtn.addEventListener("click", async () => {
       target: { tabId: tab.id },
       func: () => {
         const href = location.href;
-        // Try query params first
         const params = new URL(href).searchParams;
-        const fromParams = params.get("campaign_id") || params.get("campaign_ids");
-        if (fromParams) return fromParams.split(",")[0];
-        // Try hash fragment (TikTok often puts state in hash as JSON or key=val)
-        const hash = location.hash;
-        const hashMatch = hash.match(/campaign_id[s]?[=:](\d{15,20})/);
-        if (hashMatch) return hashMatch[1];
-        // Try URL path segments
-        const pathMatch = href.match(/\/campaign\/(\d{15,20})/);
-        if (pathMatch) return pathMatch[1];
-        return null;
+        // Collect all 15-20 digit numbers from the entire URL (query + hash)
+        const allNums = (href + location.hash).match(/\d{15,20}/g) || [];
+        const advertiserNum = params.get("aadvid") || params.get("advertiser_id");
+        // Return all candidates plus full URL for debugging
+        return {
+          fromParam: params.get("campaign_id") || params.get("campaign_ids"),
+          allNums: [...new Set(allNums)].filter(n => n !== advertiserNum),
+          url: href.slice(0, 300),
+        };
       },
     });
-    const id = results?.[0]?.result;
+    const res = results?.[0]?.result;
+    const id = res?.fromParam?.split(",")?.[0] || (res?.allNums?.length === 1 ? res.allNums[0] : null);
     if (id) {
       campaignInput.value = id;
       chrome.storage.local.set({ tt_campaign: id });
       setStatus(`Campaign detected: ${id}`, "success");
+    } else if (res?.allNums?.length > 1) {
+      // Multiple candidates — show them so user can pick
+      setStatus(`Multiple IDs found — pick one: ${res.allNums.join(" | ")}`, "error");
     } else {
-      setStatus("Can't detect — paste campaign ID from the URL manually.", "error");
+      // Dump URL so we can see the structure
+      setStatus(`Not found. URL: ${res?.url || "unknown"}`, "error");
     }
   } catch (e) {
     setStatus("Detection failed: " + e.message, "error");
