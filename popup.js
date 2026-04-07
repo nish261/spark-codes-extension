@@ -254,13 +254,22 @@ async function fetchSparkCodes(token, advertiserId) {
           codes.push({ spark_code: ad.identity_id, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "smart+" });
         }
 
-        // Check creative_list items
+        // Check creative_list[].creative_info (where Smart+ stores identity data)
         for (const c of (ad.creative_list || [])) {
-          const code = c.identity_id || c.tiktok_item_id;
-          if (!code || seen.has(code)) continue;
-          if (c.identity_type && c.identity_type !== "AUTH_CODE") continue;
-          seen.add(code);
-          codes.push({ spark_code: code, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "smart+" });
+          const info = c.creative_info || {};
+          if (info.identity_type !== "AUTH_CODE") continue;
+          const key = info.tiktok_item_id || info.identity_id;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          const matStatus = c.material_operation_status || status;
+          codes.push({
+            spark_code:    info.identity_id,
+            tiktok_item_id: info.tiktok_item_id,
+            identity_name: ad.ad_name || "N/A",
+            status:        matStatus,
+            expire_time:   null,
+            source:        "smart+",
+          });
         }
       }
       if (page * 100 >= total || !items.length) break;
@@ -287,14 +296,14 @@ function renderCodes(codes) {
     const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : null;
     const item = document.createElement("div");
     item.className = "code-item";
+    const approved = c.status === "ENABLE" || c.status === "ACTIVE";
     item.innerHTML = `
       <div class="code-value">${esc(c.spark_code)}</div>
       <div class="code-meta">
-        <span class="badge">${esc(c.status)}</span>
-        ${esc(c.identity_name)}${expire ? ` · expires ${expire}` : ""}
+        <span class="badge ${approved ? "" : "suspended"}">${esc(c.status)}</span>
+        ${esc(c.identity_name)}${c.tiktok_item_id ? ` · vid ${esc(c.tiktok_item_id)}` : ""}${expire ? ` · exp ${expire}` : ""}
       </div>
-      <span class="copy-hint">click to copy</span>
-      <span class="copy-hint" style="top:auto;bottom:6px;font-size:9px;opacity:.4">${c.source === "ad" ? "from ad" : "identity"}</span>`;
+      <span class="copy-hint">click to copy</span>`;
     item.addEventListener("click", () => copyText(c.spark_code));
     codeListEl.appendChild(item);
   }
