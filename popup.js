@@ -167,33 +167,81 @@ fetchBtn.addEventListener("click", async () => {
 async function fetchSparkCodes(token, advertiserId) {
   const seen = new Set();
   const codes = [];
-  let page = 1;
 
-  while (true) {
-    const data = await apiGet("/identity/get/", token, {
-      advertiser_id: advertiserId,
-      identity_type: "AUTH_CODE",
-      page,
-      page_size: 100,
-    });
-
-    const items = data.data?.list || [];
-    const total = data.data?.page_info?.total_number || 0;
-
-    for (const identity of items) {
-      const code = identity.identity_id;
-      if (!code || seen.has(code)) continue;
-      seen.add(code);
-      codes.push({
-        spark_code:    code,
-        identity_name: identity.display_name || identity.identity_name || "N/A",
-        status:        "ACTIVE",
-        expire_time:   identity.expire_time || null,
+  // Strategy 1: pull AUTH_CODE identities directly
+  try {
+    let page = 1;
+    while (true) {
+      const data = await apiGet("/identity/get/", token, {
+        advertiser_id: advertiserId,
+        identity_type: "AUTH_CODE",
+        page,
+        page_size: 100,
       });
+      const items = data.data?.list || [];
+      const total = data.data?.page_info?.total_number || 0;
+      for (const identity of items) {
+        const code = identity.identity_id;
+        if (!code || seen.has(code)) continue;
+        seen.add(code);
+        codes.push({
+          spark_code:    code,
+          identity_name: identity.display_name || identity.identity_name || "N/A",
+          status:        "ACTIVE",
+          expire_time:   identity.expire_time || null,
+          source:        "identity",
+        });
+      }
+      if (page * 100 >= total || !items.length) break;
+      page++;
     }
+  } catch (e) {
+    console.warn("identity/get failed:", e.message);
+  }
 
-    if (page * 100 >= total || !items.length) break;
-    page++;
+  // Strategy 2: scrape codes from ad creatives (covers suspended accounts & non-Smart+ ads)
+  try {
+    let page = 1;
+    while (true) {
+      const data = await apiGet("/ad/get/", token, {
+        advertiser_id: advertiserId,
+        page,
+        page_size: 100,
+        fields: JSON.stringify(["ad_id", "ad_name", "operation_status", "secondary_status",
+                                "identity_type", "identity_id", "tiktok_item_id"]),
+      });
+      const items = data.data?.list || [];
+      const total = data.data?.page_info?.total_number || 0;
+      for (const ad of items) {
+        const code = ad.identity_id;
+        if (!code || ad.identity_type !== "AUTH_CODE" || seen.has(code)) continue;
+        seen.add(code);
+        const status = (ad.secondary_status || ad.operation_status || "")
+          .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
+        codes.push({
+          spark_code:    code,
+          identity_name: ad.ad_name || "N/A",
+          status,
+          expire_time:   null,
+          source:        "ad",
+        });
+      }
+      if (page * 100 >= total || !items.length) break;
+      page++;
+    }
+  } catch (e) {
+    console.warn("ad/get failed:", e.message);
+  }
+
+  if (!codes.length) {
+    // Surface the raw identity/get response for debugging
+    try {
+      const raw = await apiGet("/identity/get/", token, { advertiser_id: advertiserId, page_size: 10 });
+      throw new Error(`No AUTH_CODE identities found. identity/get returned ${raw.data?.list?.length ?? 0} total identities. Check console for details.`);
+    } catch (e2) {
+      if (e2.message.startsWith("No AUTH_CODE")) throw e2;
+      throw new Error("No spark codes found and identity/get also errored: " + e2.message);
+    }
   }
 
   return codes;
@@ -215,7 +263,8 @@ function renderCodes(codes) {
         <span class="badge">${esc(c.status)}</span>
         ${esc(c.identity_name)}${expire ? ` · expires ${expire}` : ""}
       </div>
-      <span class="copy-hint">click to copy</span>`;
+      <span class="copy-hint">click to copy</span>
+      <span class="copy-hint" style="top:auto;bottom:6px;font-size:9px;opacity:.4">${c.source === "ad" ? "from ad" : "identity"}</span>`;
     item.addEventListener("click", () => copyText(c.spark_code));
     codeListEl.appendChild(item);
   }
