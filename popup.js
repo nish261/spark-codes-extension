@@ -154,8 +154,22 @@ detectAdgroupBtn.addEventListener("click", async () => {
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
+        // 1. Check URL params
         const p = new URL(location.href).searchParams;
-        return p.get("adgroup_id") || p.get("adgroupId") || null;
+        const fromUrl = p.get("adgroup_id") || p.get("adgroupId");
+        if (fromUrl) return fromUrl;
+        // 2. Scrape from table cells — TikTok renders adgroup IDs in the ad list table
+        const cells = [...document.querySelectorAll("td,span,div")];
+        for (const el of cells) {
+          const txt = (el.textContent || "").trim();
+          if (/^\d{16,19}$/.test(txt)) return txt;
+        }
+        // 3. Check all links for adgroup_id param
+        for (const a of document.querySelectorAll("a[href]")) {
+          const m = a.href.match(/adgroup_id=(\d{15,20})/);
+          if (m) return m[1];
+        }
+        return null;
       },
     });
     const id = results?.[0]?.result;
@@ -164,7 +178,7 @@ detectAdgroupBtn.addEventListener("click", async () => {
       chrome.storage.local.set({ tt_adgroup: id });
       setStatus(`Ad group detected: ${id}`, "success");
     } else {
-      setStatus("Navigate into a specific ad group first.", "error");
+      setStatus("Can't detect — paste Ad Group ID from the table manually.", "error");
     }
   } catch (e) { setStatus("Detection failed: " + e.message, "error"); }
   finally { detectAdgroupBtn.textContent = "auto-detect"; }
