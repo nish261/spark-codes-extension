@@ -208,8 +208,7 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
       if (id) reviewMap.set(id, status);
     }
   } catch (e) {
-    console.warn("material/review_info failed:", e.message);
-    reviewMap.set("__error__", e.message);
+    console.error("material/review_info FAILED:", e.message, e);
   }
 
   // Step 3: get video metadata + build final list
