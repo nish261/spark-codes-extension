@@ -2,45 +2,42 @@
 const API_BASE = "https://business-api.tiktok.com/open_api/v1.3";
 const OAUTH_URL = `https://business-api.tiktok.com/portal/auth?app_id=${APP_ID}&state=spark_plugin&redirect_uri=https%3A%2F%2Fkinetiksoul.com`;
 
-const connectBtn       = document.getElementById("connectBtn");
-const connectDot       = document.getElementById("connectDot");
-const connectLabel     = document.getElementById("connectLabel");
-const tokenBadge       = document.getElementById("tokenBadge");
-const advInput         = document.getElementById("advertiserId");
-const autoDetectBtn    = document.getElementById("autoDetectBtn");
+const connectBtn        = document.getElementById("connectBtn");
+const connectDot        = document.getElementById("connectDot");
+const connectLabel      = document.getElementById("connectLabel");
+const tokenBadge        = document.getElementById("tokenBadge");
+const advInput          = document.getElementById("advertiserId");
+const autoDetectBtn     = document.getElementById("autoDetectBtn");
 const campaignInput     = document.getElementById("campaignId");
 const detectCampaignBtn = document.getElementById("detectCampaignBtn");
-const adgroupInput      = document.getElementById("adgroupId");
-const detectAdgroupBtn  = document.getElementById("detectAdgroupBtn");
-const fetchBtn         = document.getElementById("fetchBtn");
-const debugBtn         = document.getElementById("debugBtn");
-const statusEl         = document.getElementById("status");
-const resultsEl        = document.getElementById("results");
-const codeListEl       = document.getElementById("codeList");
-const countEl          = document.getElementById("resultsCount");
-const copyAllBtn       = document.getElementById("copyAll");
-const toast            = document.getElementById("toast");
+const fetchBtn          = document.getElementById("fetchBtn");
+const statusEl          = document.getElementById("status");
+const resultsEl         = document.getElementById("results");
+const approvedList      = document.getElementById("approvedList");
+const rejectedList      = document.getElementById("rejectedList");
+const approvedCount     = document.getElementById("approvedCount");
+const rejectedCount     = document.getElementById("rejectedCount");
+const copyApproved      = document.getElementById("copyApproved");
+const toast             = document.getElementById("toast");
 
 let currentToken = null;
 let pollInterval = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-chrome.storage.local.get(["tt_token", "tt_advertiser", "tt_campaign", "tt_adgroup"], (data) => {
+chrome.storage.local.get(["tt_token", "tt_advertiser", "tt_campaign"], (data) => {
   if (data.tt_advertiser) advInput.value = data.tt_advertiser;
   if (data.tt_campaign)   campaignInput.value = data.tt_campaign;
-  if (data.tt_adgroup)    adgroupInput.value = data.tt_adgroup;
   if (data.tt_token) setConnected(data.tt_token);
 });
 
-// ── API via background (avoids MV3 popup fetch restrictions) ─────────────────
+// ── API proxy ─────────────────────────────────────────────────────────────────
 function apiGet(path, token, params = {}) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ type: "API_GET", path, token, params }, (resp) => {
       if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
       if (!resp || !resp.ok) { reject(new Error(resp?.error || "Unknown error")); return; }
-      const data = resp.data;
-      if (data.code !== 0) { reject(new Error(data.message || `API error ${data.code}`)); return; }
-      resolve(data);
+      if (resp.data.code !== 0) { reject(new Error(resp.data.message || `API error ${resp.data.code}`)); return; }
+      resolve(resp.data);
     });
   });
 }
@@ -50,30 +47,18 @@ autoDetectBtn.addEventListener("click", async () => {
   autoDetectBtn.textContent = "detecting...";
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url?.includes("tiktok.com")) {
-      setStatus("Open TikTok Ads Manager first.", "error"); return;
-    }
+    if (!tab?.url?.includes("tiktok.com")) { setStatus("Open TikTok Ads Manager first.", "error"); return; }
     const url = new URL(tab.url);
     let id = url.searchParams.get("aadvid") || url.searchParams.get("advertiser_id");
     if (!id) {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => new URL(location.href).searchParams.get("aadvid") || new URL(location.href).searchParams.get("advertiser_id") || location.href.match(/[?&\/](\d{15,20})/)?.[1] || null,
-      });
-      id = results?.[0]?.result;
+      const r = await chrome.scripting.executeScript({ target: { tabId: tab.id },
+        func: () => new URL(location.href).searchParams.get("aadvid") || new URL(location.href).searchParams.get("advertiser_id") || null });
+      id = r?.[0]?.result;
     }
-    if (id) {
-      advInput.value = id;
-      chrome.storage.local.set({ tt_advertiser: id });
-      setStatus(`Detected: ${id}`, "success");
-    } else {
-      setStatus("Couldn't detect — paste advertiser ID manually.", "error");
-    }
-  } catch (e) {
-    setStatus("Detection failed: " + e.message, "error");
-  } finally {
-    autoDetectBtn.textContent = "auto-detect";
-  }
+    if (id) { advInput.value = id; chrome.storage.local.set({ tt_advertiser: id }); setStatus(`Detected: ${id}`, "success"); }
+    else setStatus("Couldn't detect — paste manually.", "error");
+  } catch (e) { setStatus("Failed: " + e.message, "error"); }
+  finally { autoDetectBtn.textContent = "auto-detect"; }
 });
 
 // ── Auto-detect campaign ID ───────────────────────────────────────────────────
@@ -81,15 +66,11 @@ detectCampaignBtn.addEventListener("click", async () => {
   detectCampaignBtn.textContent = "detecting...";
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url?.includes("tiktok.com")) {
-      setStatus("Open TikTok Ads Manager first.", "error"); return;
-    }
+    if (!tab?.url?.includes("tiktok.com")) { setStatus("Open TikTok Ads Manager first.", "error"); return; }
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
         const advertiserIds = new Set((location.href.match(/\d{19}/g) || []));
-
-        // 1. Check sessionStorage / localStorage for selected campaign
         const stores = [sessionStorage, localStorage];
         for (const store of stores) {
           for (let i = 0; i < store.length; i++) {
@@ -100,30 +81,11 @@ detectCampaignBtn.addEventListener("click", async () => {
             } catch {}
           }
         }
-
-        // 2. Scan all text nodes and data-* attributes on the page for campaign IDs
-        // TikTok's left nav renders campaign rows with data attributes
         const candidates = new Set();
         document.querySelectorAll("[data-campaign-id],[data-id]").forEach(el => {
           const v = el.dataset.campaignId || el.dataset.id;
           if (v && /^\d{15,20}$/.test(v) && !advertiserIds.has(v)) candidates.add(v);
         });
-
-        // 3. Look in React fiber for selected campaign IDs
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-        let node;
-        while ((node = walker.nextNode())) {
-          const fiberKey = Object.keys(node).find(k => k.startsWith("__reactFiber") || k.startsWith("__reactInternals"));
-          if (!fiberKey) continue;
-          try {
-            const str = JSON.stringify(node[fiberKey]?.memoizedProps || {});
-            (str.match(/\d{15,20}/g) || []).forEach(n => {
-              if (!advertiserIds.has(n)) candidates.add(n);
-            });
-          } catch {}
-          if (candidates.size > 5) break; // don't hang
-        }
-
         const list = [...candidates];
         return list.length === 1 ? { id: list[0], src: "dom" } : { id: null, candidates: list.slice(0, 8) };
       },
@@ -138,50 +100,8 @@ detectCampaignBtn.addEventListener("click", async () => {
     } else {
       setStatus("Can't auto-detect. Go to Campaigns tab → click your campaign → try again.", "error");
     }
-  } catch (e) {
-    setStatus("Detection failed: " + e.message, "error");
-  } finally {
-    detectCampaignBtn.textContent = "auto-detect";
-  }
-});
-
-// ── Auto-detect ad group ID ───────────────────────────────────────────────────
-detectAdgroupBtn.addEventListener("click", async () => {
-  detectAdgroupBtn.textContent = "detecting...";
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url?.includes("tiktok.com")) { setStatus("Open TikTok Ads Manager first.", "error"); return; }
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        // 1. Check URL params
-        const p = new URL(location.href).searchParams;
-        const fromUrl = p.get("adgroup_id") || p.get("adgroupId");
-        if (fromUrl) return fromUrl;
-        // 2. Scrape from table cells — TikTok renders adgroup IDs in the ad list table
-        const cells = [...document.querySelectorAll("td,span,div")];
-        for (const el of cells) {
-          const txt = (el.textContent || "").trim();
-          if (/^\d{16,19}$/.test(txt)) return txt;
-        }
-        // 3. Check all links for adgroup_id param
-        for (const a of document.querySelectorAll("a[href]")) {
-          const m = a.href.match(/adgroup_id=(\d{15,20})/);
-          if (m) return m[1];
-        }
-        return null;
-      },
-    });
-    const id = results?.[0]?.result;
-    if (id) {
-      adgroupInput.value = id;
-      chrome.storage.local.set({ tt_adgroup: id });
-      setStatus(`Ad group detected: ${id}`, "success");
-    } else {
-      setStatus("Can't detect — paste Ad Group ID from the table manually.", "error");
-    }
-  } catch (e) { setStatus("Detection failed: " + e.message, "error"); }
-  finally { detectAdgroupBtn.textContent = "auto-detect"; }
+  } catch (e) { setStatus("Failed: " + e.message, "error"); }
+  finally { detectCampaignBtn.textContent = "auto-detect"; }
 });
 
 // ── Connect ───────────────────────────────────────────────────────────────────
@@ -222,58 +142,21 @@ function setConnecting() {
   connectLabel.textContent = "Waiting for authorization...";
 }
 
-// ── Debug: dump raw Smart+ ad fields ─────────────────────────────────────────
-debugBtn.addEventListener("click", async () => {
-  if (!currentToken) { setStatus("Connect first.", "error"); return; }
-  const advId = advInput.value.trim();
-  if (!advId) { setStatus("Enter advertiser ID.", "error"); return; }
-  setStatus("Fetching raw Smart+ ad data...", "");
-  try {
-    const data = await apiGet("/smart_plus/ad/get/", currentToken, {
-      advertiser_id: advId,
-      page: 1,
-      page_size: 5,
-    });
-    const list = data.data?.list || [];
-    countEl.textContent = list.length;
-    resultsEl.style.display = "block";
-    const topKeys = list[0] ? Object.keys(list[0]).join(", ") : "no data";
-    const creativeKeys = list[0]?.creative_list?.[0] ? Object.keys(list[0].creative_list[0]).join(", ") : "no creative_list";
-    codeListEl.innerHTML = `<div class="code-item"><div class="code-meta" style="word-break:break-all">
-      ad keys: ${esc(topKeys)}<br><br>
-      creative_list[0] keys: ${esc(creativeKeys)}<br><br>
-      ${list.slice(0,3).map(ad => `
-        <b>ad:</b> ${esc(ad.ad_name||ad.ad_id)}<br>
-        campaign_id: ${esc(ad.campaign_id||"—")}<br>
-        status: ${esc(ad.secondary_status||ad.operation_status||"—")}<br>
-        first creative keys: ${esc(Object.keys(ad.creative_list?.[0]||{}).join(", "))}<br>
-        first creative_info keys: ${esc(Object.keys(ad.creative_list?.[0]?.creative_info||{}).join(", "))}<br>
-        first creative_info: ${esc(JSON.stringify(ad.creative_list?.[0]?.creative_info||{}))}<br>
-        first material_operation_status: ${esc(ad.creative_list?.[0]?.material_operation_status||"—")}
-      `).join("<br>---<br>")}
-    </div></div>`;
-    setStatus(`smart_plus/ad/get: ${list.length} ads`, "success");
-  } catch(e) { setStatus("Error: " + e.message, "error"); }
-});
-
-// ── Fetch spark codes ─────────────────────────────────────────────────────────
+// ── Fetch ─────────────────────────────────────────────────────────────────────
 fetchBtn.addEventListener("click", async () => {
   if (!currentToken) { setStatus("Connect first.", "error"); return; }
-  const advId = advInput.value.trim();
+  const advId  = advInput.value.trim();
+  const campId = campaignInput.value.trim();
   if (!advId) { setStatus("Enter advertiser ID.", "error"); return; }
-  const campId    = campaignInput.value.trim();
-  const adgroupId = adgroupInput.value.trim();
   chrome.storage.local.set({ tt_advertiser: advId });
-  if (campId)    chrome.storage.local.set({ tt_campaign: campId });
-  if (adgroupId) chrome.storage.local.set({ tt_adgroup: adgroupId });
+  if (campId) chrome.storage.local.set({ tt_campaign: campId });
   fetchBtn.disabled = true;
   setStatus("Fetching...", "");
-  codeListEl.innerHTML = "";
+  approvedList.innerHTML = ""; rejectedList.innerHTML = "";
   resultsEl.style.display = "none";
   try {
-    const codes = await fetchSparkCodes(currentToken, advId, campId, adgroupId);
-    renderCodes(codes);
-    setStatus(codes.length ? `Found ${codes.length} spark code${codes.length > 1 ? "s" : ""}.` : "No spark codes found.", codes.length ? "success" : "");
+    const creatives = await fetchSparkCreatives(currentToken, advId, campId);
+    renderCreatives(creatives);
   } catch (e) {
     setStatus("Error: " + e.message, "error");
   } finally {
@@ -281,147 +164,98 @@ fetchBtn.addEventListener("click", async () => {
   }
 });
 
-async function fetchSparkCodes(token, advertiserId, campaignId = "", adgroupId = "") {
-  const seen = new Set();
-  const codes = [];
-
-  // Strategy 1: pull AUTH_CODE identities directly (no campaign filter available)
-  if (!campaignId) {
-  try {
-    let page = 1;
-    while (true) {
-      const data = await apiGet("/identity/get/", token, {
-        advertiser_id: advertiserId,
-        identity_type: "AUTH_CODE",
-        page,
-        page_size: 100,
-      });
-      const items = data.data?.list || [];
-      const total = data.data?.page_info?.total_number || 0;
-      for (const identity of items) {
-        const code = identity.identity_id;
-        if (!code || seen.has(code)) continue;
-        seen.add(code);
-        codes.push({
-          spark_code:    code,
-          identity_name: identity.display_name || identity.identity_name || "N/A",
-          status:        "ACTIVE",
-          expire_time:   identity.expire_time || null,
-          source:        "identity",
-        });
-      }
-      if (page * 100 >= total || !items.length) break;
-      page++;
-    }
-  } catch (e) {
-    console.warn("identity/get failed:", e.message);
-  }
-  } // end !campaignId guard
-
-  // Strategy 2: regular /ad/get/ — only when no campaign/adgroup filter (not Smart+)
-  if (!campaignId && !adgroupId) {
-  try {
-    let page = 1;
-    while (true) {
-      const data = await apiGet("/ad/get/", token, {
-        advertiser_id: advertiserId,
-        page,
-        page_size: 100,
-        fields: JSON.stringify(["ad_id", "ad_name", "operation_status", "secondary_status",
-                                "campaign_id", "adgroup_id", "identity_type", "identity_id", "tiktok_item_id"]),
-      });
-      const items = data.data?.list || [];
-      const total = data.data?.page_info?.total_number || 0;
-      for (const ad of items) {
-        const code = ad.identity_id;
-        if (!code || ad.identity_type !== "AUTH_CODE" || seen.has(code)) continue;
-        seen.add(code);
-        const status = (ad.secondary_status || ad.operation_status || "")
-          .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
-        codes.push({ spark_code: code, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "ad" });
-      }
-      if (page * 100 >= total || !items.length) break;
-      page++;
-    }
-  } catch (e) { console.warn("ad/get failed:", e.message); }
-  } // end no-filter guard
-
-  // Strategy 3: Smart+ ad/get — identity_id may live on the ad directly or in creative_list
-  try {
-    let page = 1;
-    while (true) {
-      const spParams = { advertiser_id: advertiserId, page, page_size: 100 };
-      const data = await apiGet("/smart_plus/ad/get/", token, spParams);
-      const items = data.data?.list || [];
-      const total = data.data?.page_info?.total_number || 0;
-      for (const ad of items) {
-        // Client-side filters
-        if (campaignId  && String(ad.campaign_id)  !== String(campaignId))  continue;
-        if (adgroupId   && String(ad.adgroup_id)   !== String(adgroupId))   continue;
-        const status = (ad.secondary_status || ad.operation_status || "")
-          .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
-
-        // Check ad-level identity_id
-        if (ad.identity_id && ad.identity_type === "AUTH_CODE" && !seen.has(ad.identity_id)) {
-          seen.add(ad.identity_id);
-          codes.push({ spark_code: ad.identity_id, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "smart+" });
-        }
-
-        // Check creative_list[].creative_info (where Smart+ stores identity data)
-        for (const c of (ad.creative_list || [])) {
-          const info = c.creative_info || {};
-          if (info.identity_type !== "AUTH_CODE") continue;
-          const key = info.tiktok_item_id || info.identity_id;
-          if (!key || seen.has(key)) continue;
-          const matStatus = c.material_operation_status || status;
-          if (matStatus !== "ENABLE") continue; // only approved creatives
-          seen.add(key);
-          codes.push({
-            spark_code:    info.identity_id,
+// ── Core fetch logic ──────────────────────────────────────────────────────────
+async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
+  // Step 1: get all Smart+ ads, collect unique AUTH_CODE creatives
+  const creativeMap = new Map(); // key: tiktok_item_id, value: {identity_id, tiktok_item_id, ad_name, ad_ids[]}
+  let page = 1;
+  while (true) {
+    const params = { advertiser_id: advertiserId, page, page_size: 100 };
+    const data = await apiGet("/smart_plus/ad/get/", token, params);
+    const items = data.data?.list || [];
+    const total = data.data?.page_info?.total_number || 0;
+    for (const ad of items) {
+      if (campaignId && String(ad.campaign_id) !== String(campaignId)) continue;
+      for (const c of (ad.creative_list || [])) {
+        const info = c.creative_info || {};
+        if (info.identity_type !== "AUTH_CODE" || !info.tiktok_item_id) continue;
+        const key = info.tiktok_item_id;
+        if (!creativeMap.has(key)) {
+          creativeMap.set(key, {
+            identity_id:    info.identity_id,
             tiktok_item_id: info.tiktok_item_id,
-            identity_name: ad.ad_name || "N/A",
-            status:        matStatus,
-            expire_time:   null,
-            source:        "smart+",
+            ad_name:        ad.ad_name || "",
+            ad_ids:         [],
+            mat_status:     c.material_operation_status,
           });
         }
+        creativeMap.get(key).ad_ids.push(ad.smart_plus_ad_id || ad.ad_id || "");
       }
-      if (page * 100 >= total || !items.length) break;
-      page++;
     }
-  } catch (e) {
-    console.warn("smart_plus/ad/get failed:", e.message);
+    if (page * 100 >= total || !items.length) break;
+    page++;
   }
 
-  if (!codes.length) {
-    throw new Error("No spark codes found across identity/get, ad/get, and smart_plus/ad/get. Click Debug to inspect raw Smart+ ad fields.");
+  if (!creativeMap.size) throw new Error("No Spark creatives found for this account/campaign.");
+
+  // Step 2: get video metadata for each unique creative
+  const results = [];
+  for (const [itemId, creative] of creativeMap) {
+    let videoUrl  = `https://www.tiktok.com/video/${itemId}`;
+    let creator   = creative.ad_name || "Unknown";
+    let thumb     = null;
+    try {
+      const vdata = await apiGet("/identity/video/info/", token, {
+        advertiser_id:  advertiserId,
+        identity_type:  "AUTH_CODE",
+        identity_id:    creative.identity_id,
+        item_id:        itemId,
+      });
+      const v = vdata.data?.video_info || vdata.data || {};
+      if (v.share_url)    videoUrl = v.share_url;
+      if (v.author_name)  creator  = v.author_name;
+      if (v.cover_image)  thumb    = v.cover_image;
+    } catch {}
+
+    // Step 3: determine status from material_operation_status
+    const approved = creative.mat_status === "ENABLE";
+    results.push({ ...creative, videoUrl, creator, thumb, approved, reason: approved ? null : creative.mat_status });
   }
 
-  return codes;
+  return results;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
-function renderCodes(codes) {
-  codeListEl.innerHTML = "";
-  if (!codes.length) { resultsEl.style.display = "none"; return; }
-  countEl.textContent = codes.length;
+function renderCreatives(creatives) {
+  approvedList.innerHTML = ""; rejectedList.innerHTML = "";
+  const approved = creatives.filter(c => c.approved);
+  const rejected = creatives.filter(c => !c.approved);
+  approvedCount.textContent = approved.length;
+  rejectedCount.textContent = rejected.length;
+
+  approved.forEach(c => approvedList.appendChild(makeItem(c)));
+  rejected.forEach(c => rejectedList.appendChild(makeItem(c)));
+
+  copyApproved.onclick = () => copyText(approved.map(c => c.videoUrl).join("\n"), "Links copied!");
   resultsEl.style.display = "block";
-  for (const c of codes) {
-    const expire = c.expire_time ? new Date(c.expire_time * 1000).toLocaleDateString() : null;
-    const item = document.createElement("div");
-    item.className = "code-item";
-    const approved = c.status === "ENABLE" || c.status === "ACTIVE";
-    item.innerHTML = `
-      <div class="code-value">${esc(c.spark_code)}</div>
-      <div class="code-meta">
-        <span class="badge ${approved ? "" : "suspended"}">${esc(c.status)}</span>
-        ${esc(c.identity_name)}${c.tiktok_item_id ? ` · vid ${esc(c.tiktok_item_id)}` : ""}${expire ? ` · exp ${expire}` : ""}
-      </div>
-      <span class="copy-hint">click to copy</span>`;
-    item.addEventListener("click", () => copyText(c.spark_code));
-    codeListEl.appendChild(item);
-  }
-  copyAllBtn.onclick = () => copyText(codes.map(c => c.spark_code).join("\n"), "All codes copied!");
+  setStatus(`${approved.length} approved · ${rejected.length} disapproved`, approved.length ? "success" : "");
+}
+
+function makeItem(c) {
+  const div = document.createElement("div");
+  div.className = `creative-item ${c.approved ? "approved" : "rejected"}`;
+  div.innerHTML = `
+    ${c.thumb ? `<img class="creative-thumb" src="${esc(c.thumb)}" />` : `<div class="creative-thumb"></div>`}
+    <div class="creative-info">
+      <div class="creative-creator">${esc(c.creator)}</div>
+      ${c.reason ? `<div class="creative-reason">${esc(c.reason.replace(/^AD_STATUS_/, "").replace(/_/g," "))}</div>` : ""}
+    </div>
+    <div class="creative-actions">
+      <a class="link-btn" href="${esc(c.videoUrl)}" target="_blank">View</a>
+      <button class="link-btn" data-url="${esc(c.videoUrl)}">Copy link</button>
+    </div>`;
+  div.querySelector("[data-url]").addEventListener("click", (e) => copyText(e.target.dataset.url));
+  return div;
 }
 
 function setStatus(msg, type = "") {
@@ -429,7 +263,7 @@ function setStatus(msg, type = "") {
   statusEl.className = "status" + (type ? ` ${type}` : "");
 }
 function esc(s) {
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 let toastTimer;
 function copyText(text, msg = "Copied!") {

@@ -4,92 +4,60 @@
   <meta charset="utf-8">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      width: 480px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0a0a0a; color: #fff;
-    }
-    .header {
-      background: #161616; padding: 16px 20px;
-      border-bottom: 1px solid #222;
-      display: flex; align-items: center; gap: 10px;
-    }
+    body { width: 480px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #fff; }
+    .header { background: #161616; padding: 16px 20px; border-bottom: 1px solid #222; display: flex; align-items: center; gap: 10px; }
     .header-logo { width: 28px; height: 28px; background: linear-gradient(135deg, #ff0050, #00f2ea); border-radius: 6px; }
     .header h1 { font-size: 15px; font-weight: 600; }
     .token-badge { margin-left: auto; font-size: 10px; padding: 3px 8px; border-radius: 10px; background: #003d20; color: #00c853; display: none; }
     .body { padding: 16px 20px; }
-
-    .connect-btn {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 20px; background: #161616;
-      border: 1px solid #333; border-radius: 8px;
-      color: #fff; font-size: 13px; font-weight: 500;
-      cursor: pointer; transition: border-color .15s, background .15s;
-      width: 100%; justify-content: center;
-    }
+    .connect-btn { display: flex; align-items: center; gap: 8px; padding: 10px 20px; background: #161616; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 13px; font-weight: 500; cursor: pointer; transition: border-color .15s, background .15s; width: 100%; justify-content: center; }
     .connect-btn:hover { background: #1e1e1e; border-color: #555; }
     .connect-btn .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
     .connect-btn.connected .dot { background: #00c853; }
     .connect-btn.connecting .dot { background: #ffaa00; animation: pulse 1s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-
     .divider { border: none; border-top: 1px solid #1e1e1e; margin: 14px 0; }
-
     .field { margin-bottom: 12px; }
     .field-row { display: flex; gap: 8px; align-items: flex-end; }
     .field-row input { flex: 1; }
     label { display: block; font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; }
-    input {
-      width: 100%; background: #161616; border: 1px solid #2a2a2a;
-      border-radius: 6px; padding: 8px 10px; color: #fff;
-      font-size: 13px; outline: none; transition: border-color .15s;
-    }
+    input { width: 100%; background: #161616; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px 10px; color: #fff; font-size: 13px; outline: none; transition: border-color .15s; }
     input:focus { border-color: #444; }
     input::placeholder { color: #444; }
-
-    .detect-btn {
-      padding: 8px 12px; background: #1e1e1e; border: 1px solid #333;
-      border-radius: 6px; color: #aaa; font-size: 11px; cursor: pointer;
-      white-space: nowrap; transition: border-color .15s;
-      flex-shrink: 0;
-    }
+    .detect-btn { padding: 8px 12px; background: #1e1e1e; border: 1px solid #333; border-radius: 6px; color: #aaa; font-size: 11px; cursor: pointer; white-space: nowrap; transition: border-color .15s; flex-shrink: 0; }
     .detect-btn:hover { border-color: #555; color: #fff; }
-
-    .btn {
-      width: 100%; padding: 10px; background: #ff0050; color: #fff;
-      border: none; border-radius: 6px; font-size: 14px; font-weight: 600;
-      cursor: pointer; transition: background .15s; margin-top: 4px;
-    }
+    .btn { width: 100%; padding: 10px; background: #ff0050; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s; margin-top: 4px; }
     .btn:hover { background: #e6004a; }
     .btn:disabled { background: #333; color: #666; cursor: not-allowed; }
-
     .status { font-size: 12px; color: #888; text-align: center; margin-top: 10px; min-height: 18px; }
     .status.error { color: #ff4444; }
     .status.success { color: #00c853; }
 
-    .results { margin-top: 16px; border-top: 1px solid #1e1e1e; padding-top: 16px; display: none; }
-    .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-    .results-title { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: .05em; }
-    .results-count { font-size: 11px; background: #1e1e1e; color: #aaa; padding: 2px 8px; border-radius: 10px; }
+    .results { margin-top: 16px; display: none; }
+
+    .bucket { margin-bottom: 14px; }
+    .bucket-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .bucket-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+    .bucket-title.approved { color: #00c853; }
+    .bucket-title.rejected { color: #ff4444; }
+    .bucket-count { font-size: 11px; background: #1e1e1e; color: #aaa; padding: 2px 8px; border-radius: 10px; }
     .copy-all { font-size: 11px; color: #00c8ff; cursor: pointer; background: none; border: none; padding: 0; }
     .copy-all:hover { text-decoration: underline; }
 
-    .code-list { max-height: 260px; overflow-y: auto; }
-    .code-list::-webkit-scrollbar { width: 4px; }
-    .code-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+    .item-list { max-height: 220px; overflow-y: auto; }
+    .item-list::-webkit-scrollbar { width: 4px; }
+    .item-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
 
-    .code-item {
-      background: #111; border: 1px solid #1e1e1e; border-radius: 6px;
-      padding: 10px 12px; margin-bottom: 6px; cursor: pointer;
-      transition: border-color .15s; position: relative;
-    }
-    .code-item:hover { border-color: #333; }
-    .code-item:hover .copy-hint { opacity: 1; }
-    .copy-hint { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #555; opacity: 0; transition: opacity .15s; }
-    .code-value { font-family: 'SF Mono', monospace; font-size: 12px; color: #00f2ea; word-break: break-all; padding-right: 50px; }
-    .code-meta { font-size: 10px; color: #555; margin-top: 4px; }
-    .badge { display: inline-block; background: #003d20; color: #00c853; font-size: 9px; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; margin-right: 6px; }
-    .badge.suspended { background: #1e1e1e; color: #666; }
+    .creative-item { background: #111; border: 1px solid #1e1e1e; border-radius: 6px; padding: 10px 12px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+    .creative-item.approved { border-left: 2px solid #00c853; }
+    .creative-item.rejected { border-left: 2px solid #ff4444; }
+    .creative-thumb { width: 36px; height: 36px; border-radius: 4px; object-fit: cover; background: #222; flex-shrink: 0; }
+    .creative-info { flex: 1; min-width: 0; }
+    .creative-creator { font-size: 12px; color: #fff; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .creative-reason { font-size: 10px; color: #ff6666; margin-top: 2px; }
+    .creative-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .link-btn { font-size: 10px; padding: 3px 8px; border-radius: 4px; background: #1e1e1e; border: 1px solid #333; color: #aaa; cursor: pointer; text-decoration: none; }
+    .link-btn:hover { border-color: #555; color: #fff; }
 
     .toast { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: #222; color: #00c853; font-size: 12px; padding: 6px 14px; border-radius: 6px; opacity: 0; transition: opacity .2s; pointer-events: none; }
     .toast.show { opacity: 1; }
@@ -98,7 +66,7 @@
 <body>
   <div class="header">
     <div class="header-logo"></div>
-    <h1>Spark Codes</h1>
+    <h1>Spark Creatives</h1>
     <span class="token-badge" id="tokenBadge">Connected</span>
   </div>
   <div class="body">
@@ -126,25 +94,25 @@
       </div>
     </div>
 
-    <div class="field">
-      <label>Ad Group ID <span style="color:#444;font-size:9px;text-transform:none">(optional — narrows further)</span></label>
-      <div class="field-row">
-        <input type="text" id="adgroupId" placeholder="leave blank for all ad groups" />
-        <button class="detect-btn" id="detectAdgroupBtn">auto-detect</button>
-      </div>
-    </div>
-
-    <button class="btn" id="fetchBtn">Fetch Spark Codes</button>
-    <button class="btn" id="debugBtn" style="background:#1e1e1e;color:#888;margin-top:6px;font-size:12px">Debug: show raw ad fields</button>
+    <button class="btn" id="fetchBtn">Fetch Spark Creatives</button>
     <div class="status" id="status"></div>
 
     <div class="results" id="results">
-      <div class="results-header">
-        <span class="results-title">Approved Codes</span>
-        <span class="results-count" id="resultsCount">0</span>
-        <button class="copy-all" id="copyAll">Copy all codes</button>
+      <div class="bucket" id="approvedBucket">
+        <div class="bucket-header">
+          <span class="bucket-title approved">✅ Approved & Delivering</span>
+          <span class="bucket-count" id="approvedCount">0</span>
+          <button class="copy-all" id="copyApproved">Copy links</button>
+        </div>
+        <div class="item-list" id="approvedList"></div>
       </div>
-      <div class="code-list" id="codeList"></div>
+      <div class="bucket" id="rejectedBucket">
+        <div class="bucket-header">
+          <span class="bucket-title rejected">❌ Disapproved / Problem</span>
+          <span class="bucket-count" id="rejectedCount">0</span>
+        </div>
+        <div class="item-list" id="rejectedList"></div>
+      </div>
     </div>
   </div>
 
