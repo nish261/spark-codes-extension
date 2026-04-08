@@ -209,6 +209,7 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
     }
   } catch (e) {
     console.warn("material/review_info failed:", e.message);
+    reviewMap.set("__error__", e.message);
   }
 
   // Step 3: get video metadata + build final list
@@ -231,10 +232,11 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
     } catch {}
 
     const reviewRaw = reviewMap.get(matId);
-    console.log({ ad_material_id: matId, review_raw: reviewRaw });
-    // ⚠️ TEMP: treat everything as unapproved so we can see real enum values in UI
+    const apiError  = reviewMap.get("__error__");
+    console.log({ ad_material_id: matId, review_raw: reviewRaw, api_error: apiError });
     const approved = false;
-    results.push({ ...creative, videoUrl, creator, thumb, approved, reason: JSON.stringify(reviewRaw ?? "no_review_data"), reviewStatus: reviewRaw });
+    const reason = apiError ? `review_info error: ${apiError}` : JSON.stringify(reviewRaw ?? "no_review_data");
+    results.push({ ...creative, videoUrl, creator, thumb, approved, reason, reviewStatus: reviewRaw });
   }
 
   return results;
