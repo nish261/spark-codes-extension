@@ -8,8 +8,10 @@ const connectLabel     = document.getElementById("connectLabel");
 const tokenBadge       = document.getElementById("tokenBadge");
 const advInput         = document.getElementById("advertiserId");
 const autoDetectBtn    = document.getElementById("autoDetectBtn");
-const campaignInput    = document.getElementById("campaignId");
+const campaignInput     = document.getElementById("campaignId");
 const detectCampaignBtn = document.getElementById("detectCampaignBtn");
+const adgroupInput      = document.getElementById("adgroupId");
+const detectAdgroupBtn  = document.getElementById("detectAdgroupBtn");
 const fetchBtn         = document.getElementById("fetchBtn");
 const debugBtn         = document.getElementById("debugBtn");
 const statusEl         = document.getElementById("status");
@@ -23,9 +25,10 @@ let currentToken = null;
 let pollInterval = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-chrome.storage.local.get(["tt_token", "tt_advertiser", "tt_campaign"], (data) => {
+chrome.storage.local.get(["tt_token", "tt_advertiser", "tt_campaign", "tt_adgroup"], (data) => {
   if (data.tt_advertiser) advInput.value = data.tt_advertiser;
   if (data.tt_campaign)   campaignInput.value = data.tt_campaign;
+  if (data.tt_adgroup)    adgroupInput.value = data.tt_adgroup;
   if (data.tt_token) setConnected(data.tt_token);
 });
 
@@ -142,6 +145,31 @@ detectCampaignBtn.addEventListener("click", async () => {
   }
 });
 
+// ── Auto-detect ad group ID ───────────────────────────────────────────────────
+detectAdgroupBtn.addEventListener("click", async () => {
+  detectAdgroupBtn.textContent = "detecting...";
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.url?.includes("tiktok.com")) { setStatus("Open TikTok Ads Manager first.", "error"); return; }
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const p = new URL(location.href).searchParams;
+        return p.get("adgroup_id") || p.get("adgroupId") || null;
+      },
+    });
+    const id = results?.[0]?.result;
+    if (id) {
+      adgroupInput.value = id;
+      chrome.storage.local.set({ tt_adgroup: id });
+      setStatus(`Ad group detected: ${id}`, "success");
+    } else {
+      setStatus("Navigate into a specific ad group first.", "error");
+    }
+  } catch (e) { setStatus("Detection failed: " + e.message, "error"); }
+  finally { detectAdgroupBtn.textContent = "auto-detect"; }
+});
+
 // ── Connect ───────────────────────────────────────────────────────────────────
 connectBtn.addEventListener("click", () => {
   if (currentToken) {
@@ -219,15 +247,17 @@ fetchBtn.addEventListener("click", async () => {
   if (!currentToken) { setStatus("Connect first.", "error"); return; }
   const advId = advInput.value.trim();
   if (!advId) { setStatus("Enter advertiser ID.", "error"); return; }
-  const campId = campaignInput.value.trim();
+  const campId    = campaignInput.value.trim();
+  const adgroupId = adgroupInput.value.trim();
   chrome.storage.local.set({ tt_advertiser: advId });
-  if (campId) chrome.storage.local.set({ tt_campaign: campId });
+  if (campId)    chrome.storage.local.set({ tt_campaign: campId });
+  if (adgroupId) chrome.storage.local.set({ tt_adgroup: adgroupId });
   fetchBtn.disabled = true;
   setStatus("Fetching...", "");
   codeListEl.innerHTML = "";
   resultsEl.style.display = "none";
   try {
-    const codes = await fetchSparkCodes(currentToken, advId, campId);
+    const codes = await fetchSparkCodes(currentToken, advId, campId, adgroupId);
     renderCodes(codes);
     setStatus(codes.length ? `Found ${codes.length} spark code${codes.length > 1 ? "s" : ""}.` : "No spark codes found.", codes.length ? "success" : "");
   } catch (e) {
@@ -237,7 +267,7 @@ fetchBtn.addEventListener("click", async () => {
   }
 });
 
-async function fetchSparkCodes(token, advertiserId, campaignId = "") {
+async function fetchSparkCodes(token, advertiserId, campaignId = "", adgroupId = "") {
   const seen = new Set();
   const codes = [];
 
@@ -274,19 +304,18 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
   }
   } // end !campaignId guard
 
-  // Strategy 2: scrape codes from ad creatives (covers suspended accounts & non-Smart+ ads)
+  // Strategy 2: regular /ad/get/ — only when no campaign/adgroup filter (not Smart+)
+  if (!campaignId && !adgroupId) {
   try {
     let page = 1;
     while (true) {
-      const params = {
+      const data = await apiGet("/ad/get/", token, {
         advertiser_id: advertiserId,
         page,
         page_size: 100,
         fields: JSON.stringify(["ad_id", "ad_name", "operation_status", "secondary_status",
-                                "campaign_id", "identity_type", "identity_id", "tiktok_item_id"]),
-      };
-      if (campaignId) params.filtering = JSON.stringify({ campaign_ids: [String(campaignId)] });
-      const data = await apiGet("/ad/get/", token, params);
+                                "campaign_id", "adgroup_id", "identity_type", "identity_id", "tiktok_item_id"]),
+      });
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
       for (const ad of items) {
@@ -295,20 +324,13 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
         seen.add(code);
         const status = (ad.secondary_status || ad.operation_status || "")
           .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
-        codes.push({
-          spark_code:    code,
-          identity_name: ad.ad_name || "N/A",
-          status,
-          expire_time:   null,
-          source:        "ad",
-        });
+        codes.push({ spark_code: code, identity_name: ad.ad_name || "N/A", status, expire_time: null, source: "ad" });
       }
       if (page * 100 >= total || !items.length) break;
       page++;
     }
-  } catch (e) {
-    console.warn("ad/get failed:", e.message);
-  }
+  } catch (e) { console.warn("ad/get failed:", e.message); }
+  } // end no-filter guard
 
   // Strategy 3: Smart+ ad/get — identity_id may live on the ad directly or in creative_list
   try {
@@ -319,8 +341,9 @@ async function fetchSparkCodes(token, advertiserId, campaignId = "") {
       const items = data.data?.list || [];
       const total = data.data?.page_info?.total_number || 0;
       for (const ad of items) {
-        // Client-side campaign filter (Smart+ API doesn't support campaign_id param)
-        if (campaignId && String(ad.campaign_id) !== String(campaignId)) continue;
+        // Client-side filters
+        if (campaignId  && String(ad.campaign_id)  !== String(campaignId))  continue;
+        if (adgroupId   && String(ad.adgroup_id)   !== String(adgroupId))   continue;
         const status = (ad.secondary_status || ad.operation_status || "")
           .replace(/^AD_STATUS_/, "").replace(/_/g, " ").trim() || "ACTIVE";
 
