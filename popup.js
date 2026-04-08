@@ -166,8 +166,8 @@ fetchBtn.addEventListener("click", async () => {
 
 // ── Core fetch logic ──────────────────────────────────────────────────────────
 async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
-  // Step 1: get all Smart+ ads, collect unique AUTH_CODE creatives
-  const creativeMap = new Map(); // key: tiktok_item_id, value: {identity_id, tiktok_item_id, ad_name, ad_ids[]}
+  // Step 1: get all Smart+ ads, collect unique AUTH_CODE creatives keyed by ad_material_id
+  const creativeMap = new Map(); // key: ad_material_id
   let page = 1;
   while (true) {
     const params = { advertiser_id: advertiserId, page, page_size: 100 };
@@ -179,17 +179,13 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
       for (const c of (ad.creative_list || [])) {
         const info = c.creative_info || {};
         if (info.identity_type !== "AUTH_CODE" || !info.tiktok_item_id) continue;
-        const key = info.tiktok_item_id;
-        if (!creativeMap.has(key)) {
-          creativeMap.set(key, {
-            identity_id:    info.identity_id,
-            tiktok_item_id: info.tiktok_item_id,
-            ad_name:        ad.ad_name || "",
-            ad_ids:         [],
-            mat_status:     c.material_operation_status,
-          });
-        }
-        creativeMap.get(key).ad_ids.push(ad.smart_plus_ad_id || ad.ad_id || "");
+        if (!c.ad_material_id || creativeMap.has(c.ad_material_id)) continue;
+        creativeMap.set(c.ad_material_id, {
+          ad_material_id: c.ad_material_id,
+          identity_id:    info.identity_id,
+          tiktok_item_id: info.tiktok_item_id,
+          ad_name:        ad.ad_name || "",
+        });
       }
     }
     if (page * 100 >= total || !items.length) break;
@@ -198,28 +194,46 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
 
   if (!creativeMap.size) throw new Error("No Spark creatives found for this account/campaign.");
 
-  // Step 2: get video metadata for each unique creative
+  // Step 2: get real review status from /smart_plus/material/review_info/
+  const materialIds = [...creativeMap.keys()];
+  const reviewMap = new Map(); // ad_material_id → review status string
+  try {
+    const rdata = await apiGet("/smart_plus/material/review_info/", token, {
+      advertiser_id:   advertiserId,
+      ad_material_ids: JSON.stringify(materialIds),
+    });
+    for (const item of (rdata.data?.list || [])) {
+      const id     = item.ad_material_id;
+      const status = item.review_status || item.material_review_status || item.status || "";
+      if (id) reviewMap.set(id, status);
+    }
+  } catch (e) {
+    console.warn("material/review_info failed:", e.message);
+  }
+
+  // Step 3: get video metadata + build final list
   const results = [];
-  for (const [itemId, creative] of creativeMap) {
-    let videoUrl  = `https://www.tiktok.com/video/${itemId}`;
-    let creator   = creative.ad_name || "Unknown";
-    let thumb     = null;
+  for (const [matId, creative] of creativeMap) {
+    let videoUrl = `https://www.tiktok.com/video/${creative.tiktok_item_id}`;
+    let creator  = creative.ad_name || "Unknown";
+    let thumb    = null;
     try {
       const vdata = await apiGet("/identity/video/info/", token, {
-        advertiser_id:  advertiserId,
-        identity_type:  "AUTH_CODE",
-        identity_id:    creative.identity_id,
-        item_id:        itemId,
+        advertiser_id: advertiserId,
+        identity_type: "AUTH_CODE",
+        identity_id:   creative.identity_id,
+        item_id:       creative.tiktok_item_id,
       });
       const v = vdata.data?.video_info || vdata.data || {};
-      if (v.share_url)    videoUrl = v.share_url;
-      if (v.author_name)  creator  = v.author_name;
-      if (v.cover_image)  thumb    = v.cover_image;
+      if (v.share_url)   videoUrl = v.share_url;
+      if (v.author_name) creator  = v.author_name;
+      if (v.cover_image) thumb    = v.cover_image;
     } catch {}
 
-    // Step 3: determine status from material_operation_status
-    const approved = creative.mat_status === "ENABLE";
-    results.push({ ...creative, videoUrl, creator, thumb, approved, reason: approved ? null : creative.mat_status });
+    const reviewStatus = reviewMap.get(matId) || "";
+    const approved = reviewStatus === "APPROVED" || reviewStatus === "PASSED" || reviewStatus === "ACTIVE" || reviewStatus === "";
+    const reason   = reviewStatus && !approved ? reviewStatus : null;
+    results.push({ ...creative, videoUrl, creator, thumb, approved, reason, reviewStatus });
   }
 
   return results;
