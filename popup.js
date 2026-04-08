@@ -202,6 +202,7 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
       advertiser_id:   advertiserId,
       ad_material_ids: JSON.stringify(materialIds),
     });
+    console.log("review_info RAW RESPONSE:", JSON.stringify(rdata));
     for (const item of (rdata.data?.list || [])) {
       const id     = item.ad_material_id;
       const status = item.review_status || item.material_review_status || item.status || "";
