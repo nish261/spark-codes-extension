@@ -230,10 +230,11 @@ async function fetchSparkCreatives(token, advertiserId, campaignId = "") {
       if (v.cover_image) thumb    = v.cover_image;
     } catch {}
 
-    const reviewStatus = reviewMap.get(matId) || "";
-    const approved = reviewStatus === "APPROVED" || reviewStatus === "PASSED" || reviewStatus === "ACTIVE" || reviewStatus === "";
-    const reason   = reviewStatus && !approved ? reviewStatus : null;
-    results.push({ ...creative, videoUrl, creator, thumb, approved, reason, reviewStatus });
+    const reviewRaw = reviewMap.get(matId);
+    console.log({ ad_material_id: matId, review_raw: reviewRaw });
+    // ⚠️ TEMP: treat everything as unapproved so we can see real enum values in UI
+    const approved = false;
+    results.push({ ...creative, videoUrl, creator, thumb, approved, reason: JSON.stringify(reviewRaw ?? "no_review_data"), reviewStatus: reviewRaw });
   }
 
   return results;
